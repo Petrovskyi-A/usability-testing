@@ -684,44 +684,91 @@
   </script>
 <script id="drag-scroll">
 (function(){
-  function scroller(el){
-    for(;el&&el!==document.body;el=el.parentElement){
-      var cs=getComputedStyle(el);
-      if((cs.overflowX==='auto'||cs.overflowX==='scroll')&&el.scrollWidth>el.clientWidth+1)return el;
-    }
+  function canScroll(el,ax){
+    var cs=getComputedStyle(el),o=ax==='x'?cs.overflowX:cs.overflowY;
+    if(o!=='auto'&&o!=='scroll')return false;
+    return ax==='x'?el.scrollWidth>el.clientWidth+1:el.scrollHeight>el.clientHeight+1;
+  }
+  function scroller(el,ax){
+    for(;el&&el!==document.body;el=el.parentElement){if(canScroll(el,ax))return el;}
     return null;
   }
-  var s=null,x0=0,l0=0,moved=false,snap='';
+  var down=null,s=null,ax=null,x0=0,y0=0,l0=0,t0=0,snap='',k=1;
+  var lastY=0,lastT=0,vel=0,raf=0;
   document.addEventListener('mousedown',function(e){
     if(e.button!==0)return;
-    var el=scroller(e.target); if(!el)return;
-    s=el;x0=e.clientX;l0=el.scrollLeft;moved=false;
-    snap=el.style.scrollSnapType;
+    cancelAnimationFrame(raf);
+    down=e.target;x0=e.clientX;y0=e.clientY;s=null;ax=null;
+    var ph=document.querySelector('.phone');
+    if(ph){var r=ph.getBoundingClientRect();k=r.width/(ph.offsetWidth||r.width)||1;}
   },true);
   document.addEventListener('mousemove',function(e){
-    if(!s)return;
-    var r=s.getBoundingClientRect(),k=r.width/(s.offsetWidth||r.width)||1;
-    var dx=(e.clientX-x0)/k;
-    if(!moved&&Math.abs(dx)>5){moved=true;s.style.scrollSnapType='none';s.style.scrollBehavior='auto';s.style.cursor='grabbing';document.body.style.userSelect='none';}
-    if(moved){s.scrollLeft=l0-dx;e.preventDefault();}
+    if(!down)return;
+    var dx=(e.clientX-x0)/k,dy=(e.clientY-y0)/k;
+    if(!s){
+      if(Math.abs(dx)<=5&&Math.abs(dy)<=5)return;
+      ax=Math.abs(dx)>Math.abs(dy)?'x':'y';
+      s=scroller(down,ax);
+      if(!s){down=null;return;}
+      l0=s.scrollLeft;t0=s.scrollTop;snap=s.style.scrollSnapType;
+      s.style.scrollSnapType='none';s.style.scrollBehavior='auto';
+      document.body.style.cursor='grabbing';document.body.style.userSelect='none';
+      x0=e.clientX;y0=e.clientY;dx=0;dy=0;lastY=e.clientY;lastT=performance.now();vel=0;
+    }
+    if(ax==='x')s.scrollLeft=l0-dx;
+    else{
+      s.scrollTop=t0-dy;
+      var now=performance.now(),dt=now-lastT;
+      if(dt>0){vel=0.8*((e.clientY-lastY)/k/dt)+0.2*vel;lastY=e.clientY;lastT=now;}
+    }
+    e.preventDefault();
   },true);
   document.addEventListener('mouseup',function(){
-    if(!s)return;
-    var el=s;s=null;
-    el.style.cursor='';document.body.style.userSelect='';
-    if(moved){
-      var left=el.scrollLeft;el.style.scrollSnapType=snap;el.style.scrollBehavior='';
-      if(snap!=='none'){el.scrollLeft=left;}
-      window.__dragJustEnded=true;setTimeout(function(){window.__dragJustEnded=false;},0);
+    if(!down)return;
+    var el=s,a=ax;down=null;s=null;
+    if(!el)return;
+    document.body.style.cursor='';document.body.style.userSelect='';
+    el.style.scrollBehavior='';
+    if(a==='x'){var left=el.scrollLeft;el.style.scrollSnapType=snap;el.scrollLeft=left;}
+    else{
+      el.style.scrollSnapType=snap;
+      if(performance.now()-lastT>80)vel=0;
+      var v=vel*16,prev=performance.now();
+      (function glide(){
+        if(Math.abs(v)<0.3)return;
+        var now=performance.now(),f=(now-prev)/16;prev=now;
+        el.scrollTop-=v*f;v*=Math.pow(0.95,f);
+        raf=requestAnimationFrame(glide);
+      })();
     }
+    window.__dragJustEnded=true;setTimeout(function(){window.__dragJustEnded=false;},0);
   },true);
   document.addEventListener('click',function(e){
     if(window.__dragJustEnded){e.stopPropagation();e.preventDefault();window.__dragJustEnded=false;}
   },true);
-  document.addEventListener('dragstart',function(e){if(scroller(e.target))e.preventDefault();},true);
+  document.addEventListener('dragstart',function(e){if(e.target.closest&&e.target.closest('.phone'))e.preventDefault();},true);
   var st=document.createElement('style');
-  st.textContent='.hscroll,.hs,.st-filters{cursor:grab}.hscroll img,.hs img,.st-filters img{-webkit-user-drag:none;user-drag:none}';
+  st.textContent='.hscroll,.hs,.st-filters{cursor:grab}.phone img{-webkit-user-drag:none;user-drag:none}';
   document.head.appendChild(st);
+})();
+</script>
+<script id="tap-indicator">
+(function(){
+  var st=document.createElement('style');
+  st.textContent='.tap-dot{position:fixed;left:0;top:0;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;pointer-events:none;z-index:2147483647;background:rgba(37,35,44,.16);animation:tapdot .425s linear forwards}@keyframes tapdot{0%{transform:scale(.35);opacity:1;animation-timing-function:cubic-bezier(.2,.7,.3,1)}29%{transform:scale(1);opacity:1;animation-timing-function:ease-in-out}100%{transform:scale(1.04);opacity:0}}';
+  document.head.appendChild(st);
+  window.addEventListener('click',function(e){
+    if(window.__dragJustEnded)return;
+    var ph=document.querySelector('.phone');
+    if(ph&&!ph.contains(e.target))return;
+    if(!e.isTrusted)return;
+    var k=1;if(ph){var r=ph.getBoundingClientRect();k=r.width/(ph.offsetWidth||r.width)||1;}
+    var d=document.createElement('div');d.className='tap-dot';
+    d.style.left=e.clientX+'px';d.style.top=e.clientY+'px';
+    d.style.width=d.style.height=(40*k)+'px';d.style.margin=(-20*k)+'px 0 0 '+(-20*k)+'px';
+    document.body.appendChild(d);
+    d.addEventListener('animationend',function(){d.remove();});
+  },true);
 })();
 </script>
 </body>
